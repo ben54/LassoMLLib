@@ -1,80 +1,70 @@
-import org.apache.spark.mllib.tree.DecisionTree
-import org.apache.spark.mllib.tree.model.DecisionTreeModel
+import org.apache.spark.mllib.regression.LassoModel
 import org.apache.spark.mllib.util.MLUtils
 import org.apache.spark.SparkContext
 import org.apache.spark.SparkConf
+import org.apache.spark.mllib.linalg.Vectors
+import org.apache.spark.mllib.regression.LabeledPoint
+import org.apache.spark.mllib.regression.LassoWithSGD
+import java.io.File
+import java.io.BufferedWriter
+import java.io.FileWriter
 
 object Main {
   def main(args: Array[String]) {
-    val conf = new SparkConf().setAppName("DecisionTreeMLLib")
+    
+    val conf = new SparkConf().setAppName("LassoMLLib")
     val sc = new SparkContext(conf)
-    /*
-     * The following came from https://spark.apache.org/docs/1.6.2/mllib-decision-tree.html
-     */
-
-    /* 
-     * Load and parse the data file. See ./data/mllib/sample_libsvm_data.txt for the data
-     * See https://spark.apache.org/docs/latest/mllib-data-types.html for info on formats.
-     * The big thing seems to be to put the class as the first value in each row.  This 
-     * particular format seems to be for sparse data, where it makes more sense to only list 
-     * nonzero values.
-     */
-    val data = MLUtils.loadLibSVMFile(sc, "data/mllib/sample_libsvm_data.txt")
-    // Split the data into training and test sets (30% held out for testing)
-    val splits = data.randomSplit(Array(0.7, 0.3))
-    val (trainingData, testData) = (splits(0), splits(1))
     
-    /* Train a DecisionTree model.
-     * Empty categoricalFeaturesInfo indicates all features are continuous.
-     * For those categorical variables which are continuous, put them into the map
-     * as indexOfVariable -> numberOfValuesVariableCanTake.  So, for example, if 
-     * the variable with index 5 is weather corresponding to "hot, cool, cold", then
-     * put (5,3) into the map and, for that feature, encode _hot_, _cool_, and _cold_
-     * as 0,1,2 respectively.
-    */
-    val categoricalFeaturesInfo = Map[Int, Int]()
-    /* Impurity is the way that a decision tree algorithm evaluates a candidate split.  DT's
-     * are _greedy_ algorithms - they start at the root and add nodes in a greedy fashion.  They
-     * do this because finding the optimal decision tree is NP-complete 
-     * (see https://people.csail.mit.edu/rivest/HyafilRivest-ConstructingOptimalBinaryDecisionTreesIsNPComplete.pdf)
-     * The greedy algorithm looks at candidate features to split on as it constructs the tree.
-     * Candidate splits are evaluated using the impurity measure - those splits which are more pure 
-     * (i.e. have low impurity) are preferred.  The impurity is measured by how the training data gets
-     * distributed over the nodes on the split.  0 impurity, for instance, would put lead to nodes
-     * containing only one class (or, for regression, a single predicted value).  For regression, the only 
-     * option MLLib gives you is variance, but that's okay.
-     */
-    val impurity = "variance"
-    /*
-     * maxDepth governs how deep the tree can grow.  Deep trees lead to better accuracy but are prone to overfitting 
-     * the data.  Controlling the complexity of a model is known as "regularization" and this is one way that 
-     * regularization is done in DT algorithms.
-     */
-    val maxDepth = 5
-    //this is another form of regularization that controls how many bins a continuous feature can be split into
-    val maxBins = 32
-    
-    val model = DecisionTree.trainRegressor(trainingData, categoricalFeaturesInfo, impurity,
-      maxDepth, maxBins)
-    
-    // Evaluate model on test instances and compute test error
-    val labelsAndPredictions = testData.map { point =>
-      val prediction = model.predict(point.features)
-      (point.label, prediction)
+    // Load and parse the data
+//    val data = sc.textFile("data/mllib/ridge-data/lpsa.data")
+//    val parsedData = data.map { line =>
+//      val parts = line.split(',')
+//      LabeledPoint(parts(0).toDouble, Vectors.dense(parts(1).split(' ').map(_.toDouble)))
+//    }.cache()
+    val data = sc.textFile("data/wine.txt")
+    val parsedData = data.map { line =>
+    val parts = line.split(';')
+      LabeledPoint(parts.last.toDouble, Vectors.dense(parts.take(11).map(_.toDouble)))
     }
-    // mean squared error (MSE) is a common way of evaluating the accurcay of a regression model
-    val testMSE = labelsAndPredictions.map{ case (v, p) => math.pow(v - p, 2) }.mean()
-//    println("Test Mean Squared Error = " + testMSE)
-//    println("Learned regression tree model:\n" + model.toDebugString)
+
     
-    // Save and load model
-    model.save(sc, "target/tmp/myDecisionTreeRegressionModel")
-    val sameModel = DecisionTreeModel.load(sc, "target/tmp/myDecisionTreeRegressionModel")
+    //To write out the results
+    val outputFile = new File("lassoModelDescription.txt")
+    val writer = new BufferedWriter(new FileWriter(outputFile))
     
-    println("Test Mean Squared Error = " + testMSE)
-    println("Learned regression tree model:\n" + model.toDebugString)
+    //going to investigate the effects of various choices of the regularization parameter
+    //1.0 makes all weights 0, 0.01 makes all weights non-zero
+//    val regularizationParams = Vector(0.001,0.01,0.1,0.5,1.0)
+    val regularizationParams = Vector(0.0001,0.001,0.01)
+    regularizationParams.foreach { reg =>  
+      // Building the model
+      val numIterations = 100
+      val stepSize = 0.000001
+      val miniBatchFraction = 1.0
+      val model = LassoWithSGD.train(parsedData, numIterations, reg, miniBatchFraction)
+      
+//      var regression = new LassoWithSGD().setIntercept(true)
+//      regression.optimizer.setStepSize(0.001)
+//      val model = regression.run(parsedData)
+      
+      // Evaluate model on training examples and compute training error
+      val valuesAndPreds = parsedData.map { point =>
+        val prediction = model.predict(point.features)
+        (point.label, prediction)
+      }
+      val MSE = valuesAndPreds.map{ case(v, p) => math.pow((v - p), 2) }.mean()
+      
+      //write results to file
+      writer.write("Regularization param: " + reg + ", Mean Squared Error: " + MSE + "\n")
+      writer.write("Weights: " + model.weights.toArray.mkString(",") + "\n")
+//      writer.write(model.toPMML() + "\n\n")
+    }
+    //close results file writer
+    writer.close
     
-    
-    
+    // Example of saving and loading model
+//    val model = LassoWithSGD.train(parsedData, 10000,0.1, 1.0)
+//    model.save(sc, "target/tmp/scalaLassoWithSGDModel")
+//    val sameModel = LassoModel.load(sc, "target/tmp/scalaLassoWithSGDModel")
   }
 }
