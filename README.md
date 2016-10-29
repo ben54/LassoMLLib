@@ -1,1 +1,10 @@
 #LassoMLLib
+
+Playing with MLLib's implementation of LASSO.  LASSO is a linear regression method.  For linear regression models, if you have vector valued inputs x and continuous output y, you model y by f(x) = w'x.  The 'goodness' of a model is measured using Mean Squared Error (MSE) = (y-f(x))^2.  LASSO differs from regular linear regression models, though, in that there's an additional term in the error function.  Error = MSE + (C * sum of absolute value of weights in w).  Think about this error function.  It makes a trade off between the actual MSE error that the model produces _and_ the sum of the absolute value of the weights (called the L1 norm) found in the model.  This second term is called a _regularization_ term and serves to penalize the complexity of the model.  This is the idea behind _all_ regularization methods and the intent is to prevent overfitting (overfitting is the phenomenon where overly complex models are used to get very small errors on the training data but the models don't generalize well to new data).  L1 regularization methods promote models with zeroed out weights (this is a little tricky to describe here but read about the L1 ball to get started and I'll fill in the details later).
+
+One of the difficulties with this model, though, is that there are a few parameters to choose (unlike the elegantly simple decision tree model), in addition to having to normalize the data.  Normalization makes comparisons across dimensions more reasonable.  For some algorithms this matters (like this one), while for others it doesn't (like for decision trees).  In addition, you'll have to set the value of C (it defaults to 0.01, I think - the documentation seems to be off on this), as well as a learning rate, and batch size.
+
+````
+sbt clean package
+spark-submit --class Main --master local[*] target/scala-2.11/lassomllib_2.11-1.0.jar
+````
